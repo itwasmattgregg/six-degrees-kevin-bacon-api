@@ -1,64 +1,90 @@
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
+const axios = require('axios');
+const _ = require('lodash');
 
-// const { MongoClient } = require('mongodb');
+const { MongoClient } = require('mongodb');
 
 const app = express();
 const port = process.env.PORT || 5656;
 const dburl = 'mongodb://localhost:27017';
-const dbName = 'myproject';
-
-async function getLinksOnAPage(pageUrl) {
-  const browser = await puppeteer.launch();
-  const page = await browser.newPage();
-  /* Go to the IMDB Movie page and wait for it to load */
-  await page.goto(pageUrl, { waitUntil: 'networkidle0' });
-  /* Run javascript inside of the page */
-  const finalArray = await page.evaluate(() => {
-    const results = document.querySelectorAll('.mw-parser-output a[href^="/wiki"]');
-    const filteredResults = [];
-
-    results.forEach(node => {
-      if (!node) return;
-      filteredResults.push(node.href);
-    });
-    return filteredResults;
-  });
-  await browser.close();
-
-  return finalArray;
-}
+const dbName = 'kevin-bacon';
 
 app.use(cors());
 
 app.get('/api/v1/degreesOfKevin', (req, res) => {
   (async () => {
-    const links1 = await getLinksOnAPage('https://en.wikipedia.org/wiki/Kevin_Bacon');
-
-    const linkObj = {};
-
-    await recursive(0, links1.length - 1);
-
-    res.send(linkObj);
-
-    async function recursive(linkNumber, total) {
-      if (linkNumber === total) {
-        return;
+    function getAllPagesLinkingTo(pageid, array = [], continueId) {
+      let url = `http://en.wikipedia.org/w/api.php?format=json&action=query&pageids=${pageid}&prop=linkshere&lhlimit=500`;
+      if (continueId) {
+        url = `http://en.wikipedia.org/w/api.php?format=json&action=query&pageids=${pageid}&prop=linkshere&lhlimit=500&lhcontinue=${continueId}`;
       }
-      console.log(linkNumber, linkObj);
-      getLinksOnAPage(links1[linkNumber]).then(res => {
-        linkObj[links1[linkNumber]] = res;
-        recursive(linkNumber + 1, total)
-      });
+
+      return axios.get(url)
+        .then((response) => {
+          const pages = [
+            ...array,
+            ...response.data.query.pages[pageid].linkshere
+          ];
+
+          if (response.data.continue) {
+            return getAllPagesLinkingTo(pageid, pages, response.data.continue.lhcontinue);
+          } else {
+            return pages;
+          }
+        })
+        .catch((err) => {
+          return err;
+        });
+    };
+
+    // This isn't recursive right now. Will break on big pages
+    function linksOnPage(title, array = [], continueId) {
+      let url = `http://en.wikipedia.org/w/api.php?format=json&action=query&titles=${title}&prop=links&pllimit=500`;
+      if (continueId) {
+        url = `http://en.wikipedia.org/w/api.php?format=json&action=query&titles=${title}&prop=links&pllimit=500&plcontinue=${continueId}`;
+      }
+      return axios.get(url)
+        .then((response) => {
+          const [first] = Object.keys(response.data.query.pages)
+          const pages = [
+            ...array,
+            ...response.data.query.pages[first].links
+          ];
+          if (response.data.continue) {
+            return linksOnPage(title, pages, response.data.continue.plcontinue);
+          } else {
+            return pages;
+          }
+        })
+        .catch((err) => {
+          return err;
+        });
     }
 
-    async function recursion(runNumber, totalRuns, pageUrl) {
+    let numDegrees = 0;
 
-      // Get links from page
-      // Store links in db
-      // kick off new recursion function from each link in array
+    const searchTitle = req.query.wikiUrl.substring(req.query.wikiUrl.lastIndexOf('/') + 1);
+
+    const pagesToKevin = await getAllPagesLinkingTo("16827");
+
+    if (_.some(pagesToKevin, obj => {
+      return obj.title === decodeURI(searchTitle).replace('_', ' ');
+    })) {
+      numDegrees = 1;
+      res.send(`${numDegrees} degree${numDegrees > 1 ? 's': ''} of separation`);
+      // Exit function. Response has been sent;
+      return;
     }
+
+    const linksOnRequestedPage = await linksOnPage(searchTitle);
+
+    if (_.intersectionBy(linksOnRequestedPage, pagesToKevin, 'title')) {
+      res.send(`2 degrees of separation`);
+      return;
+    }
+    res.send(`Can't find it`);
   })();
 });
 
