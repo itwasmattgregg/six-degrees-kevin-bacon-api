@@ -1,15 +1,10 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer');
 const axios = require('axios');
 const _ = require('lodash');
 
-const { MongoClient } = require('mongodb');
-
 const app = express();
 const port = process.env.PORT || 5656;
-const dburl = 'mongodb://localhost:27017';
-const dbName = 'kevin-bacon';
 
 app.use(cors());
 
@@ -64,6 +59,8 @@ app.get('/api/v1/degreesOfKevin', (req, res) => {
     }
 
     let numDegrees = 0;
+
+    // TODO: handle no query here.
 
     const searchTitle = req.query.wikiUrl.substring(req.query.wikiUrl.lastIndexOf('/') + 1);
 
